@@ -16,8 +16,10 @@ jobs:
     runs-on: ubuntu-22.04
     
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install dependencies
         run: |
@@ -27,6 +29,14 @@ jobs:
             libelf-dev libncurses5-dev libncursesw5-dev \
             libssl-dev python3 python3-dev rsync \
             subversion swig unzip wget zlib1g-dev
+
+      - name: Fetch OpenWrt source from upstream
+        run: |
+          git remote add upstream https://github.com/andrewjlamarche/openwrt.git || true
+          git fetch upstream sbe1v1k
+          git reset --hard upstream/sbe1v1k
+          echo "OpenWrt source fetched successfully"
+          ls -la | head -20
 
       - name: Update feeds
         run: |
@@ -43,6 +53,9 @@ jobs:
           CONFIG_PACKAGE_kmod-ath12k=y
           CONFIG_PACKAGE_wpad-openssl=y
           CONFIG_PACKAGE_luci=y
+          CONFIG_PACKAGE_luci-app-firewall=y
+          CONFIG_PACKAGE_firewall4=y
+          CONFIG_PACKAGE_nftables=y
           EOF
 
       - name: Generate build config
@@ -59,12 +72,23 @@ jobs:
       - name: Prepare firmware
         run: |
           mkdir -p firmware-release
+          echo "=== Checking build output ==="
           if [ -d "bin/targets/qualcommbe/ipq95xx" ]; then
-            find bin/targets/qualcommbe/ipq95xx -name "*sbe1v1k*" -exec cp {} firmware-release/ \;
-            cd firmware-release && sha256sum * > SHA256SUMS 2>/dev/null || true
+            echo "Found build directory, listing contents:"
+            ls -lh bin/targets/qualcommbe/ipq95xx/
+            find bin/targets/qualcommbe/ipq95xx -type f -exec cp {} firmware-release/ \;
+          else
+            echo "Build directory not found at bin/targets/qualcommbe/ipq95xx"
+            find bin -type f -name "*" 2>/dev/null | head -20
+          fi
+          
+          if [ -n "$(find firmware-release -type f 2>/dev/null)" ]; then
+            cd firmware-release
+            sha256sum * > SHA256SUMS 2>/dev/null || true
+            echo "=== Firmware files ready ==="
             ls -lh
           else
-            echo "Build directory not found"
+            echo "No firmware files found"
           fi
 
       - name: Commit and push firmware
@@ -72,12 +96,12 @@ jobs:
           git config user.email "action@github.com"
           git config user.name "Build Action"
           mkdir -p releases/sbe1v1k/$(date +%Y-%m-%d)
-          if [ -n "$(find firmware-release -type f)" ]; then
-            cp -v firmware-release/* releases/sbe1v1k/$(date +%Y-%m-%d)/
+          if [ -n "$(find firmware-release -type f 2>/dev/null)" ]; then
+            cp -v firmware-release/* releases/sbe1v1k/$(date +%Y-%m-%d)/ 2>/dev/null || true
           fi
           git add releases/
-          git commit -m "Build: SBE1V1K firmware $(date +%Y-%m-%d)" || echo "No changes"
-          git push
+          git commit -m "Build: SBE1V1K firmware $(date +%Y-%m-%d_%H-%M-%S)" || echo "No changes to commit"
+          git push origin sbe1v1k || echo "Push failed or no changes"
         continue-on-error: true
 
       - name: Upload artifacts
@@ -86,3 +110,4 @@ jobs:
           name: sbe1v1k-firmware-$(date +%Y-%m-%d)
           path: firmware-release/
           retention-days: 30
+        continue-on-error: true
