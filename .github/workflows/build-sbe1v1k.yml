@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     
     steps:
       - name: Checkout code
@@ -24,8 +24,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential ccache ecj fastjar file g++ gawk gettext git \
-            java-propose-classpath libelf-dev libncurses5-dev libncursesw5-dev \
-            libssl-dev python3 python3-distutils python3-setuptools rsync \
+            libelf-dev libncurses5-dev libncursesw5-dev \
+            libssl-dev python3 python3-dev rsync \
             subversion swig unzip wget zlib1g-dev
 
       - name: Update feeds
@@ -60,8 +60,11 @@ jobs:
         run: |
           mkdir -p firmware-release
           if [ -d "bin/targets/qualcommbe/ipq95xx" ]; then
-            cp bin/targets/qualcommbe/ipq95xx/*sbe1v1k* firmware-release/ 2>/dev/null || true
+            find bin/targets/qualcommbe/ipq95xx -name "*sbe1v1k*" -exec cp {} firmware-release/ \;
             cd firmware-release && sha256sum * > SHA256SUMS 2>/dev/null || true
+            ls -lh
+          else
+            echo "Build directory not found"
           fi
 
       - name: Commit and push firmware
@@ -69,7 +72,9 @@ jobs:
           git config user.email "action@github.com"
           git config user.name "Build Action"
           mkdir -p releases/sbe1v1k/$(date +%Y-%m-%d)
-          cp -r firmware-release/* releases/sbe1v1k/$(date +%Y-%m-%d)/ 2>/dev/null || true
+          if [ -n "$(find firmware-release -type f)" ]; then
+            cp -v firmware-release/* releases/sbe1v1k/$(date +%Y-%m-%d)/
+          fi
           git add releases/
           git commit -m "Build: SBE1V1K firmware $(date +%Y-%m-%d)" || echo "No changes"
           git push
