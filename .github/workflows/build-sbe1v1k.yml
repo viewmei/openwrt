@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - sbe1v1k
-      - main
   schedule:
     - cron: '0 0 * * *'
   workflow_dispatch:
@@ -15,30 +14,33 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: openwrt/sdk:qualcommbe-openwrt-latest
-
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
-          apt-get update
-          apt-get install -y build-essential ccache file g++ gawk gettext git libelf-dev libncurses5-dev libssl-dev python3 rsync unzip wget zlib1g-dev
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential ccache ecj fastjar file g++ gawk gettext git \
+            java-propose-classpath libelf-dev libncurses5-dev libncursesw5-dev \
+            libssl-dev python3 python3-distutils python3-setuptools rsync \
+            subversion swig unzip wget zlib1g-dev
 
       - name: Update feeds
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Create .config
+      - name: Create .config for SBE1V1K
         run: |
           cat > .config << 'EOF'
           CONFIG_TARGET_qualcommbe=y
-          CONFIG_TARGET_qualcommbe_generic=y
-          CONFIG_TARGET_DEVICE_qualcommbe_generic_DEVICE_askey_sbe1v1k=y
-          CONFIG_PACKAGE_kmod-ath11k=y
+          CONFIG_TARGET_qualcommbe_ipq95xx=y
+          CONFIG_TARGET_qualcommbe_ipq95xx_DEVICE_askey_sbe1v1k=y
+          CONFIG_PACKAGE_ath12k-firmware-qcn9274=y
+          CONFIG_PACKAGE_kmod-ath12k=y
           CONFIG_PACKAGE_wpad-openssl=y
           CONFIG_PACKAGE_luci=y
           EOF
@@ -48,6 +50,7 @@ jobs:
 
       - name: Download sources
         run: make download V=s
+        continue-on-error: true
 
       - name: Build firmware
         run: make -j$(nproc) V=s
@@ -56,22 +59,25 @@ jobs:
       - name: Prepare firmware
         run: |
           mkdir -p firmware-release
-          cp bin/targets/qualcommbe/generic/* firmware-release/ 2>/dev/null || true
-          cd firmware-release && sha256sum * > SHA256SUMS 2>/dev/null || true
+          if [ -d "bin/targets/qualcommbe/ipq95xx" ]; then
+            cp bin/targets/qualcommbe/ipq95xx/*sbe1v1k* firmware-release/ 2>/dev/null || true
+            cd firmware-release && sha256sum * > SHA256SUMS 2>/dev/null || true
+          fi
 
-      - name: Commit and push
+      - name: Commit and push firmware
         run: |
           git config user.email "action@github.com"
           git config user.name "Build Action"
           mkdir -p releases/sbe1v1k/$(date +%Y-%m-%d)
-          cp firmware-release/* releases/sbe1v1k/$(date +%Y-%m-%d)/ 2>/dev/null || true
+          cp -r firmware-release/* releases/sbe1v1k/$(date +%Y-%m-%d)/ 2>/dev/null || true
           git add releases/
-          git commit -m "Build: SBE1V1K $(date +%Y-%m-%d)" || true
+          git commit -m "Build: SBE1V1K firmware $(date +%Y-%m-%d)" || echo "No changes"
           git push
+        continue-on-error: true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sbe1v1k-firmware
+          name: sbe1v1k-firmware-$(date +%Y-%m-%d)
           path: firmware-release/
           retention-days: 30
