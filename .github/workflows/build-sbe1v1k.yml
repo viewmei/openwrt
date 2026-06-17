@@ -1,0 +1,77 @@
+name: Build OpenWrt SBE1V1K
+
+on:
+  push:
+    branches:
+      - sbe1v1k
+      - main
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: openwrt/sdk:qualcommbe-openwrt-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y build-essential ccache file g++ gawk gettext git libelf-dev libncurses5-dev libssl-dev python3 rsync unzip wget zlib1g-dev
+
+      - name: Update feeds
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Create .config
+        run: |
+          cat > .config << 'EOF'
+          CONFIG_TARGET_qualcommbe=y
+          CONFIG_TARGET_qualcommbe_generic=y
+          CONFIG_TARGET_DEVICE_qualcommbe_generic_DEVICE_askey_sbe1v1k=y
+          CONFIG_PACKAGE_kmod-ath11k=y
+          CONFIG_PACKAGE_wpad-openssl=y
+          CONFIG_PACKAGE_luci=y
+          EOF
+
+      - name: Generate build config
+        run: make defconfig
+
+      - name: Download sources
+        run: make download V=s
+
+      - name: Build firmware
+        run: make -j$(nproc) V=s
+        timeout-minutes: 360
+
+      - name: Prepare firmware
+        run: |
+          mkdir -p firmware-release
+          cp bin/targets/qualcommbe/generic/* firmware-release/ 2>/dev/null || true
+          cd firmware-release && sha256sum * > SHA256SUMS 2>/dev/null || true
+
+      - name: Commit and push
+        run: |
+          git config user.email "action@github.com"
+          git config user.name "Build Action"
+          mkdir -p releases/sbe1v1k/$(date +%Y-%m-%d)
+          cp firmware-release/* releases/sbe1v1k/$(date +%Y-%m-%d)/ 2>/dev/null || true
+          git add releases/
+          git commit -m "Build: SBE1V1K $(date +%Y-%m-%d)" || true
+          git push
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbe1v1k-firmware
+          path: firmware-release/
+          retention-days: 30
