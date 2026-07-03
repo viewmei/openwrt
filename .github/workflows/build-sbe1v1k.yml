@@ -46,15 +46,16 @@ jobs:
 
       - name: Fetch OpenWrt source from upstream
         run: |
+          echo "Fetching OpenWrt SBE1V1K branch from andrewjlamarche..."
           git remote add upstream https://github.com/andrewjlamarche/openwrt.git || true
-          git fetch upstream sbe1v1k:upstream-sbe1v1k --depth=1
+          git fetch upstream sbe1v1k:upstream-sbe1v1k
           git checkout upstream-sbe1v1k
-          echo "=== OpenWrt source fetched successfully ==="
-          git log -1 --oneline
-          git remote -v
+          echo "=== OpenWrt source fetched ==="
+          git log -1 --pretty=format:"%h - %s (%an, %ar)"
+          echo ""
           df -h
 
-      - name: Prepare cache directories
+      - name: Prepare build environment
         run: |
           mkdir -p ccache
           echo "CCACHE_DIR=$GITHUB_WORKSPACE/ccache" >> $GITHUB_ENV
@@ -78,7 +79,7 @@ jobs:
       - name: Update feeds
         run: |
           ./scripts/feeds update -a
-          ./scripts/feeds install -a -p kenzo
+          ./scripts/feeds install -a
 
       - name: Create .config for SBE1V1K
         run: |
@@ -87,13 +88,12 @@ jobs:
           CONFIG_TARGET_qualcommbe_ipq95xx=y
           CONFIG_TARGET_qualcommbe_ipq95xx_DEVICE_askey_sbe1v1k=y
           CONFIG_KERNEL_NVMEM_BLOCK=y
-          CONFIG_PACKAGE_ath12k-firmware-qcn6214=y
           CONFIG_PACKAGE_ath12k-firmware-qcn9274=y
           CONFIG_PACKAGE_kmod-ath12k=y
           CONFIG_PACKAGE_kmod-hwmon-pwmfan=y
           CONFIG_PACKAGE_kmod-phy-realtek=y
           CONFIG_PACKAGE_ipq-wifi-askey_sbe1v1k=y
-          CONFIG_PACKAGE_rtl8261n-firmware=y
+          CONFIG_PACKAGE_rtl826x-firmware=y
           CONFIG_PACKAGE_f2fsck=y
           CONFIG_PACKAGE_mkf2fs=y
           CONFIG_PACKAGE_wpad-openssl=y
@@ -111,17 +111,18 @@ jobs:
           CONFIG_PACKAGE_patch=y
           CONFIG_PACKAGE_uci=y
           EOF
+          echo "=== .config created ==="
+          tail -15 .config
 
       - name: Generate build config
         run: |
           make defconfig
-          echo "=== Final .config ==="
-          tail -20 .config
+          echo "=== Build configuration validated ==="
 
       - name: Download sources
         run: |
-          make download V=s -j4
-          find dl -type f -exec ls -lh {} \; | wc -l
+          echo "Starting download phase..."
+          make download V=s -j4 2>&1 | tail -20
         continue-on-error: true
 
       - name: Show ccache stats before build
@@ -129,58 +130,56 @@ jobs:
 
       - name: Build firmware
         run: |
-          echo "Starting build with $(nproc) cores..."
+          echo "Build started: $(date)"
+          echo "Available cores: $(nproc)"
           make -j$(nproc) V=s 2>&1 | tee build.log
-          echo "Build completed"
+          echo "Build completed: $(date)"
         timeout-minutes: 400
 
       - name: Show ccache stats after build
         run: ccache -s
 
-      - name: Check build output
+      - name: Check build results
         if: always()
         run: |
-          echo "=== Build output directory structure ==="
-          find bin -type d | head -20
-          echo "=== Checking for firmware files ==="
-          find bin -type f \( -name "*.bin" -o -name "*.itb" -o -name "*.squashfs" \) -ls
-          echo "=== Available images ==="
-          ls -lh bin/targets/qualcommbe/ipq95xx/ 2>/dev/null || echo "Directory not found"
+          echo "=== Checking build output ==="
+          if [ -d "bin/targets/qualcommbe/ipq95xx" ]; then
+            echo "✓ Build directory found"
+            ls -lh bin/targets/qualcommbe/ipq95xx/
+          else
+            echo "✗ Build directory NOT found - checking alternatives..."
+            find bin -type d -name "*ipq*" 2>/dev/null
+            find bin -type f \( -name "*.bin" -o -name "*.itb" -o -name "*.squashfs" \) 2>/dev/null | head -10
+          fi
 
       - name: Prepare firmware release
         if: success()
         run: |
+          set -e
           mkdir -p firmware-release
-          BUILD_DATE=$(date +%Y-%m-%d)
-          BUILD_TIME=$(date +%H-%M-%S)
           
-          if [ -d "bin/targets/qualcommbe/ipq95xx" ]; then
-            echo "Copying firmware files..."
-            find bin/targets/qualcommbe/ipq95xx -type f -exec cp {} firmware-release/ \;
-            
-            if [ -n "$(find firmware-release -type f 2>/dev/null)" ]; then
-              cd firmware-release
-              ls -lh
-              sha256sum * > SHA256SUMS
-              echo "=== Release created on $BUILD_DATE $BUILD_TIME ==="
-              cat SHA256SUMS
-            fi
-          else
-            echo "ERROR: bin/targets/qualcommbe/ipq95xx not found"
+          if [ ! -d "bin/targets/qualcommbe/ipq95xx" ]; then
+            echo "ERROR: bin/targets/qualcommbe/ipq95xx not found!"
+            echo "Build output structure:"
+            find bin -type d | head -20
             exit 1
           fi
-
-      - name: Create release and upload
-        if: success()
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: firmware-${{ github.run_id }}
-          release_name: SBE1V1K Firmware Build ${{ github.run_id }}
-          draft: false
-          prerelease: false
-        continue-on-error: true
+          
+          echo "Copying firmware files..."
+          find bin/targets/qualcommbe/ipq95xx -type f -exec cp {} firmware-release/ \;
+          
+          if [ -z "$(find firmware-release -type f 2>/dev/null)" ]; then
+            echo "ERROR: No firmware files copied!"
+            exit 1
+          fi
+          
+          cd firmware-release
+          echo "=== Firmware files ready ==="
+          ls -lh
+          sha256sum * > SHA256SUMS
+          echo ""
+          echo "=== SHA256 checksums ==="
+          cat SHA256SUMS
 
       - name: Upload firmware artifacts
         if: success()
@@ -189,7 +188,7 @@ jobs:
           name: sbe1v1k-firmware-${{ github.run_number }}
           path: firmware-release/
           retention-days: 60
-          if-no-files-found: warn
+          if-no-files-found: error
 
       - name: Upload build log
         if: always()
@@ -200,13 +199,16 @@ jobs:
           retention-days: 30
           if-no-files-found: ignore
 
-      - name: Comment on build status
+      - name: Build status report
         if: always()
         run: |
+          echo "=== Build Status Report ==="
           if [ -f firmware-release/SHA256SUMS ]; then
-            echo "✅ Build completed successfully!"
-            echo "Firmware ready in artifacts"
+            echo "✅ SUCCESS: Firmware built successfully!"
+            echo "Artifacts created:"
+            ls -1 firmware-release/ | head -10
           else
-            echo "❌ Build failed or no firmware generated"
+            echo "❌ FAILED: Build did not produce expected output"
+            echo "Last 50 lines of build log:"
             tail -50 build.log || true
           fi
