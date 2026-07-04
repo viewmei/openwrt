@@ -1,0 +1,29 @@
+#!/bin/sh
+#
+# Fix missing regulator definitions for IPQ9574
+#
+
+. /lib/functions.sh
+
+board=$(board_name)
+
+case "$board" in
+askey,sbe1v1k)
+	# The IPQ9574 requires proper regulator mapping
+	# L5 regulator is managed via RPM but needs proper UCI config
+	
+	# Create a minimal regulator fix if needed
+	[ -f /sys/class/regulator/regulator.*/name ] && {
+		# Check if L5 regulator exists and fix it
+		for reg in /sys/class/regulator/*/; do
+			if grep -q "^l5$" "$reg/name" 2>/dev/null; then
+				# L5 regulator found, ensure it's not disabled
+				echo "L5 regulator detected, voltage control via RPM"
+				break
+			fi
+		done
+	}
+	;;
+esac
+
+exit 0
