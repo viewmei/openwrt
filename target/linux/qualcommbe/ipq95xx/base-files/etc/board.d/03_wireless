@@ -1,0 +1,62 @@
+#!/bin/sh
+#
+# Wireless configuration initialization for SBE1V1K
+#
+
+. /lib/functions.sh
+. /lib/functions/system.sh
+
+board=$(board_name)
+
+case "$board" in
+askey,sbe1v1k)
+	# Initialize wireless configuration
+	uci batch <<EOF
+set wireless.radio0='wifi-device'
+set wireless.radio0.type='ath12k'
+set wireless.radio0.phyname='phy0'
+set wireless.radio0.hwmode='6g'
+set wireless.radio0.disabled=0
+
+set wireless.default_radio0='wifi-iface'
+set wireless.default_radio0.device='radio0'
+set wireless.default_radio0.network='wan'
+set wireless.default_radio0.mode='ap'
+set wireless.default_radio0.ssid='OpenWrt-6G'
+set wireless.default_radio0.encryption='none'
+set wireless.default_radio0.disabled=0
+
+set wireless.radio1='wifi-device'
+set wireless.radio1.type='ath12k'
+set wireless.radio1.phyname='phy1'
+set wireless.radio1.hwmode='5g'
+set wireless.radio1.disabled=0
+
+set wireless.default_radio1='wifi-iface'
+set wireless.default_radio1.device='radio1'
+set wireless.default_radio1.network='wan'
+set wireless.default_radio1.mode='ap'
+set wireless.default_radio1.ssid='OpenWrt-5G'
+set wireless.default_radio1.encryption='none'
+set wireless.default_radio1.disabled=0
+
+set wireless.radio2='wifi-device'
+set wireless.radio2.type='ath12k'
+set wireless.radio2.phyname='phy2'
+set wireless.radio2.hwmode='2g'
+set wireless.radio2.disabled=0
+
+set wireless.default_radio2='wifi-iface'
+set wireless.default_radio2.device='radio2'
+set wireless.default_radio2.network='lan'
+set wireless.default_radio2.mode='ap'
+set wireless.default_radio2.ssid='OpenWrt-2G'
+set wireless.default_radio2.encryption='none'
+set wireless.default_radio2.disabled=0
+
+commit wireless
+EOF
+	;;
+esac
+
+exit 0
