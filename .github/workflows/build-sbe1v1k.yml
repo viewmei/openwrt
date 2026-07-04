@@ -96,11 +96,14 @@ jobs:
           CONFIG_PACKAGE_kmod-phy-realtek=y
           CONFIG_PACKAGE_kmod-nft-offload=y
           
-          # WiFi/Wireless
+          # WiFi/Wireless - CRITICAL PACKAGES
           CONFIG_PACKAGE_ath12k-firmware-qcn9274=y
           CONFIG_PACKAGE_kmod-ath12k=y
           CONFIG_PACKAGE_ipq-wifi-askey_sbe1v1k=y
           CONFIG_PACKAGE_wpad-openssl=y
+          
+          # BDF/Calibration data - MUST HAVE for WiFi
+          CONFIG_ATH12K_MEM_PROFILE_512M=y
           
           # Firmware
           CONFIG_PACKAGE_rtl826x-firmware=y
@@ -183,10 +186,12 @@ jobs:
           if [ -d "bin/targets/qualcommbe/ipq95xx" ]; then
             echo "✓ Build directory found"
             ls -lh bin/targets/qualcommbe/ipq95xx/
+            echo ""
+            echo "=== Checking for WiFi firmware files ==="
+            find bin -path "*/lib/firmware/ath12k*" -type f 2>/dev/null | head -20
           else
-            echo "✗ Build directory NOT found - checking alternatives..."
+            echo "✗ Build directory NOT found"
             find bin -type d -name "*ipq*" 2>/dev/null
-            find bin -type f \( -name "*.bin" -o -name "*.itb" -o -name "*.squashfs" \) 2>/dev/null | head -10
           fi
 
       - name: Prepare firmware release
@@ -197,13 +202,19 @@ jobs:
           
           if [ ! -d "bin/targets/qualcommbe/ipq95xx" ]; then
             echo "ERROR: bin/targets/qualcommbe/ipq95xx not found!"
-            echo "Build output structure:"
-            find bin -type d | head -20
             exit 1
           fi
           
           echo "Copying firmware files..."
           find bin/targets/qualcommbe/ipq95xx -type f -exec cp {} firmware-release/ \;
+          
+          echo "Checking firmware package contents..."
+          for f in firmware-release/*; do
+            if file "$f" | grep -q "gzip"; then
+              echo "Extracting firmware from: $(basename $f)"
+              tar -tzf "$f" | grep -i "ath12k.*board\|ath12k.*cal" | head -10 || true
+            fi
+          done
           
           if [ -z "$(find firmware-release -type f 2>/dev/null)" ]; then
             echo "ERROR: No firmware files copied!"
@@ -243,9 +254,9 @@ jobs:
           if [ -f firmware-release/SHA256SUMS ]; then
             echo "✅ SUCCESS: Firmware built successfully!"
             echo "Artifacts created:"
-            ls -1 firmware-release/ | head -10
+            ls -1 firmware-release/
           else
             echo "❌ FAILED: Build did not produce expected output"
-            echo "Last 50 lines of build log:"
-            tail -50 build.log || true
+            echo "Last 100 lines of build log:"
+            tail -100 build.log || true
           fi
